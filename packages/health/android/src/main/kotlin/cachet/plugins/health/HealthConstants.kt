@@ -1,11 +1,39 @@
 package cachet.plugins.health
 
+import android.Manifest
+import android.os.Build
 import com.google.android.gms.fitness.FitnessActivities
+import com.google.android.gms.fitness.data.DataType
 
 object HealthConstants {
     const val CHANNEL_NAME = "flutter_health"
-    const val GOOGLE_FIT_PERMISSIONS_REQUEST_CODE = 1111
     const val MMOLL_2_MGDL = 18.0 // 1 mmoll= 18 mgdl
+
+    private val SDK_INT = Build.VERSION.SDK_INT
+
+    private val accessFineLocationPermission = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    private val activityRecognitionPermission = if (SDK_INT >= Build.VERSION_CODES.Q) {
+        arrayOf(Manifest.permission.ACTIVITY_RECOGNITION)
+    } else {
+        emptyArray()
+    }
+
+    private val bodySensorsPermission = if (SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        arrayOf(Manifest.permission.BODY_SENSORS)
+    } else {
+        emptyArray()
+    }
+
+    val dataTypePermissionsMap = hashMapOf(
+        DataType.TYPE_ACTIVITY_SEGMENT to activityRecognitionPermission,
+        DataType.TYPE_CALORIES_EXPENDED to activityRecognitionPermission,
+        DataType.TYPE_DISTANCE_DELTA to activityRecognitionPermission + accessFineLocationPermission,
+        DataType.TYPE_HEART_RATE_BPM to bodySensorsPermission,
+        DataType.TYPE_LOCATION_SAMPLE to accessFineLocationPermission,
+        DataType.TYPE_SPEED to accessFineLocationPermission,
+        DataType.TYPE_STEP_COUNT_DELTA to activityRecognitionPermission,
+    )
 
     val workoutTypeMap = hashMapOf(
         "AEROBICS" to FitnessActivities.AEROBICS,

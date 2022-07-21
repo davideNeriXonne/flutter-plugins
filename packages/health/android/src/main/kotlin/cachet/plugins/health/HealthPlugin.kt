@@ -2,11 +2,7 @@ package cachet.plugins.health
 
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Handler
-import android.util.Log
 import androidx.annotation.NonNull
-import androidx.core.content.ContextCompat
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.fitness.Fitness
 import com.google.android.gms.fitness.FitnessActivities
@@ -19,109 +15,137 @@ import com.google.android.gms.fitness.result.DataReadResponse
 import com.google.android.gms.fitness.result.SessionReadResponse
 import com.google.android.gms.tasks.OnFailureListener
 import com.google.android.gms.tasks.OnSuccessListener
+import io.flutter.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
-import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
-import io.flutter.plugin.common.PluginRegistry.Registrar
+import io.flutter.plugin.common.PluginRegistry
 import java.util.*
 import java.util.concurrent.*
 
 
-class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandler,
-  ActivityResultListener, Result, ActivityAware, FlutterPlugin {
-  private var result: Result? = null
-  private var handler: Handler? = null
-  private var activity: Activity? = null
-  private var threadPoolExecutor: ExecutorService? = null
+class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware, PluginRegistry.ActivityResultListener {
+
+  companion object {
+    private const val TAG = "HealthPlugin"
+    private const val RC_GOOGLE_FIT = 1889
+  }
+
+  private lateinit var channel: MethodChannel
+  private lateinit var threadPoolExecutor: ExecutorService
+
+  private var attachedActivity: Activity? = null
+  private var permissionResult: MethodChannel.Result? = null
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, HealthConstants.CHANNEL_NAME)
-    channel?.setMethodCallHandler(this)
     threadPoolExecutor = Executors.newFixedThreadPool(4)
+    channel = MethodChannel(flutterPluginBinding.binaryMessenger, HealthConstants.CHANNEL_NAME)
+    channel.setMethodCallHandler(this)
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-    channel = null
-    activity = null
-    threadPoolExecutor?.shutdown()
-    threadPoolExecutor = null
+    channel.setMethodCallHandler(null)
+    threadPoolExecutor.shutdown()
   }
 
-  // This static function is optional and equivalent to onAttachedToEngine. It supports the old
-  // pre-Flutter-1.12 Android projects. You are encouraged to continue supporting
-  // plugin registration via this function while apps migrate to use the new Android APIs
-  // post-flutter-1.12 via https://flutter.dev/go/android-project-migration.
-  //
-  // It is encouraged to share logic between onAttachedToEngine and registerWith to keep
-  // them functionally equivalent. Only one of onAttachedToEngine or registerWith will be called
-  // depending on the user's project. onAttachedToEngine or registerWith must both be defined
-  // in the same class.
-  companion object {
-    @Suppress("unused")
-    @JvmStatic
-    fun registerWith(registrar: Registrar) {
-      val channel = MethodChannel(registrar.messenger(), HealthConstants.CHANNEL_NAME)
-      val plugin = HealthPlugin(channel)
-      registrar.addActivityResultListener(plugin)
-      channel.setMethodCallHandler(plugin)
-    }
+  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    attachedActivity = binding.activity
+    binding.addActivityResultListener(this)
   }
 
-  /// DataTypes to register
-  // private val fitnessOptions = FitnessOptions.builder()
-  //         .addDataType(keyToHealthDataType(BODY_FAT_PERCENTAGE), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(HEIGHT), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(WEIGHT), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(STEPS), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(ACTIVE_ENERGY_BURNED), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(HEART_RATE), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(BODY_TEMPERATURE), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(BLOOD_PRESSURE_SYSTOLIC), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(BLOOD_OXYGEN), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(BLOOD_GLUCOSE), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(MOVE_MINUTES), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(DISTANCE_DELTA), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(WATER), FitnessOptions.ACCESS_READ)
-  //         .addDataType(keyToHealthDataType(SLEEP_ASLEEP), FitnessOptions.ACCESS_READ)
-  //         .accessActivitySessions(FitnessOptions.ACCESS_READ)
-  //         .accessSleepSessions(FitnessOptions.ACCESS_READ)
-  //         .build()
-
-
-  override fun success(p0: Any?) {
-    handler?.post { result?.success(p0) }
+  override fun onDetachedFromActivityForConfigChanges() {
+    onDetachedFromActivity()
   }
 
-  override fun notImplemented() {
-    handler?.post { result?.notImplemented() }
+  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    onAttachedToActivity(binding)
   }
 
-  override fun error(
-    errorCode: String, errorMessage: String?, errorDetails: Any?
-  ) {
-    handler?.post { result?.error(errorCode, errorMessage, errorDetails) }
+  override fun onDetachedFromActivity() {
+    attachedActivity = null
   }
-
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-    if (requestCode == HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE) {
-      if (resultCode == Activity.RESULT_OK) {
-        Log.d("FLUTTER_HEALTH", "Access Granted!")
-        mResult?.success(true)
-      } else if (resultCode == Activity.RESULT_CANCELED) {
-        Log.d("FLUTTER_HEALTH", "Access Denied!")
-        mResult?.success(false)
-      }
+    if (requestCode == RC_GOOGLE_FIT) {
+      permissionResult?.success(resultCode == Activity.RESULT_OK)
     }
+    permissionResult = null
     return false
   }
 
-  private var mResult: Result? = null
+  override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+    Log.d(TAG, "onMethodCall: method = '${call.method}', arguments = '${call.arguments}'")
+    try {
+      when (call.method) {
+        "hasPermissions" -> hasPermissions(call, result)
+        "requestAuthorization" -> requestAuthorization(call, result)
+        "getData" -> getData(call, result)
+        "getTotalStepsInInterval" -> getTotalStepsInInterval(call, result)
+        "writeData" -> writeData(call, result)
+        "writeWorkoutData" -> writeWorkoutData(call, result)
+        else -> result.notImplemented()
+      }
+    } catch (e: Throwable) {
+      Log.e(TAG, call.method, e)
+      result.error(call.method, e.message ?: e.javaClass.simpleName, null)
+    }
+  }
+
+  private fun callToFitnessOptions(call: MethodCall): FitnessOptions {
+    val types = call.argument<List<String>>("types")!!.map(HealthDataType::fromString)
+    val permissions = call.argument<List<Int>>("permissions")!!
+    if (types.size != permissions.size) {
+      throw IllegalArgumentException("types and permissions must have the same size")
+    }
+
+    val optionsBuilder = FitnessOptions.builder()
+    types.forEachIndexed { i, type ->
+      val access = permissions[i]
+      when (access) {
+        0 -> optionsBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_READ)
+        1 -> optionsBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_WRITE)
+        2 -> {
+          optionsBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_READ)
+          optionsBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_WRITE)
+        }
+        else -> throw IllegalArgumentException("Unknown access type $access")
+      }
+      if (type == HealthDataType.SLEEP_ASLEEP || type == HealthDataType.SLEEP_AWAKE || type == HealthDataType.SLEEP_IN_BED || type == HealthDataType.WORKOUT) {
+        optionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+        when (access) {
+          0 -> optionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+          1 -> optionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_WRITE)
+          2 -> {
+            optionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+            optionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_WRITE)
+          }
+          else -> throw IllegalArgumentException("Unknown access type $access")
+        }
+      }
+    }
+    return optionsBuilder.build()
+  }
+
+  private fun hasPermissions(call: MethodCall, result: MethodChannel.Result) {
+    val activity = attachedActivity ?: return result.success(false)
+    result.success(GoogleSignIn.hasPermissions(
+      GoogleSignIn.getLastSignedInAccount(activity),
+      callToFitnessOptions(call)
+    ))
+  }
+
+  private fun requestAuthorization(call: MethodCall, result: MethodChannel.Result) {
+    val activity = attachedActivity ?: return result.success(false)
+
+    val account = GoogleSignIn.getLastSignedInAccount(activity)
+    val fitnessOptions = callToFitnessOptions(call)
+    if (GoogleSignIn.hasPermissions(account, fitnessOptions)) return result.success(true)
+
+    permissionResult = result
+    GoogleSignIn.requestPermissions(activity, RC_GOOGLE_FIT, account, fitnessOptions)
+  }
 
   private fun isIntField(dataSource: DataSource, unit: Field): Boolean {
     val dataPoint = DataPoint.builder(dataSource).build()
@@ -143,56 +167,51 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     }
   }
 
-  private fun writeData(call: MethodCall, result: Result) {
-
-    if (activity == null) {
-      result.success(false)
-      return
-    }
+  private fun writeData(call: MethodCall, result: MethodChannel.Result) {
+    val appContext = attachedActivity?.applicationContext ?: return result.success(false)
 
     val type = HealthDataType.fromString(call.argument<String>("dataTypeKey")!!)
     val startTime = call.argument<Long>("startTime")!!
     val endTime = call.argument<Long>("endTime")!!
     val value = call.argument<Float>("value")!!
 
-    val typesBuilder = FitnessOptions.builder()
-    typesBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_WRITE)
+    val fitnessOptionsBuilder = FitnessOptions.builder()
+    fitnessOptionsBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_WRITE)
+    if (type.dataType == DataType.TYPE_SLEEP_SEGMENT) {
+      fitnessOptionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+    }
+    val fitnessOptions = fitnessOptionsBuilder.build()
 
     val dataSource = DataSource.Builder()
       .setDataType(type.dataType)
       .setType(DataSource.TYPE_RAW)
-      .setDevice(Device.getLocalDevice(activity!!.applicationContext))
-      .setAppPackageName(activity!!.applicationContext)
+      .setDevice(Device.getLocalDevice(appContext))
+      .setAppPackageName(appContext)
       .build()
 
-    val builder = if (startTime == endTime)
-      DataPoint.builder(dataSource)
-        .setTimestamp(startTime, TimeUnit.MILLISECONDS)
-    else
-      DataPoint.builder(dataSource)
-        .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
+    val dataPointBuilder = DataPoint.builder(dataSource)
 
-    // Conversion is needed because glucose is stored as mmoll in Google Fit;
-    // while mgdl is used for glucose in this plugin.
-    val isGlucose = type.field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
-    val dataPoint = if (!isIntField(dataSource, type.field))
-      builder.setField(type.field, (if (!isGlucose) value else (value / HealthConstants.MMOLL_2_MGDL).toFloat()))
-        .build() else
-      builder.setField(type.field, value.toInt()).build()
-
-    val dataSet = DataSet.builder(dataSource)
-      .add(dataPoint)
-      .build()
-
-    if (type.dataType == DataType.TYPE_SLEEP_SEGMENT) {
-      typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+    // Set time
+    if (startTime == endTime) {
+      dataPointBuilder.setTimestamp(startTime, TimeUnit.MILLISECONDS)
+    } else {
+      dataPointBuilder.setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
     }
-    val fitnessOptions = typesBuilder.build()
+
+    // Set value
+    if (isIntField(dataSource, type.field)) {
+      dataPointBuilder.setField(type.field, value.toInt())
+    } else if (type.field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL) {
+      // Conversion needed because glucose is stored as mmoll in Google Fit, while mgdl is used in this plugin.
+      dataPointBuilder.setField(type.field, (value / HealthConstants.MMOLL_2_MGDL).toFloat())
+    } else {
+      dataPointBuilder.setField(type.field, value)
+    }
+
     try {
-      val googleSignInAccount =
-        GoogleSignIn.getAccountForExtension(activity!!.applicationContext, fitnessOptions)
-      Fitness.getHistoryClient(activity!!.applicationContext, googleSignInAccount)
-        .insertData(dataSet)
+      val account = GoogleSignIn.getAccountForExtension(appContext, fitnessOptions)
+      Fitness.getHistoryClient(appContext, account)
+        .insertData(DataSet.builder(dataSource).add(dataPointBuilder.build()).build())
         .addOnSuccessListener {
           Log.i("FLUTTER_HEALTH::SUCCESS", "DataSet added successfully!")
           result.success(true)
@@ -201,16 +220,13 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           Log.w("FLUTTER_HEALTH::ERROR", "There was an error adding the DataSet", e)
           result.success(false)
         }
-    } catch (e3: Exception) {
+    } catch (e: Exception) {
       result.success(false)
     }
   }
 
-  private fun writeWorkoutData(call: MethodCall, result: Result) {
-    if (activity == null) {
-      result.success(false)
-      return
-    }
+  private fun writeWorkoutData(call: MethodCall, result: MethodChannel.Result) {
+    val activity = attachedActivity ?: return result.success(false)
 
     val type = call.argument<String>("activityType")!!
     val startTime = call.argument<Long>("startTime")!!
@@ -222,7 +238,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
     // Create the Activity Segment DataSource
     val activitySegmentDataSource = DataSource.Builder()
-      .setAppPackageName(activity!!.packageName)
+      .setAppPackageName(activity.packageName)
       .setDataType(DataType.TYPE_ACTIVITY_SEGMENT)
       .setStreamName("FLUTTER_HEALTH - Activity")
       .setType(DataSource.TYPE_RAW)
@@ -242,7 +258,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     if (totalDistance != null) {
       // Create a data source
       val distanceDataSource = DataSource.Builder()
-        .setAppPackageName(activity!!.packageName)
+        .setAppPackageName(activity.packageName)
         .setDataType(DataType.TYPE_DISTANCE_DELTA)
         .setStreamName("FLUTTER_HEALTH - Distance")
         .setType(DataSource.TYPE_RAW)
@@ -262,7 +278,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     if (totalEnergyBurned != null) {
       // Create a data source
       val energyDataSource = DataSource.Builder()
-        .setAppPackageName(activity!!.packageName)
+        .setAppPackageName(activity.packageName)
         .setDataType(DataType.TYPE_CALORIES_EXPENDED)
         .setStreamName("FLUTTER_HEALTH - Calories")
         .setType(DataSource.TYPE_RAW)
@@ -300,7 +316,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     val insertRequest = sessionInsertRequestBuilder.build()
 
     val fitnessOptionsBuilder = FitnessOptions.builder()
-      .addDataType(DataType.TYPE_ACTIVITY_SEGMENT, FitnessOptions.ACCESS_WRITE)
+    fitnessOptionsBuilder.addDataType(DataType.TYPE_ACTIVITY_SEGMENT, FitnessOptions.ACCESS_WRITE)
     if (totalDistance != null) {
       fitnessOptionsBuilder.addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_WRITE)
     }
@@ -310,20 +326,11 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     val fitnessOptions = fitnessOptionsBuilder.build()
 
     try {
-      val googleSignInAccount =
-        GoogleSignIn.getAccountForExtension(activity!!.applicationContext, fitnessOptions)
-      if (!GoogleSignIn.hasPermissions(googleSignInAccount, fitnessOptions)) {
-        GoogleSignIn.requestPermissions(
-          activity!!,
-          HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
-          googleSignInAccount,
-          fitnessOptions
+      Fitness
+        .getSessionsClient(
+          activity.applicationContext,
+          GoogleSignIn.getAccountForExtension(activity.applicationContext, fitnessOptions)
         )
-      }
-      Fitness.getSessionsClient(
-        activity!!.applicationContext,
-        GoogleSignIn.getAccountForExtension(activity!!.applicationContext, fitnessOptions)
-      )
         .insertSession(insertRequest)
         .addOnSuccessListener {
           Log.i("FLUTTER_HEALTH::SUCCESS", "Workout was successfully added!")
@@ -339,98 +346,74 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   }
 
 
-  private fun getData(call: MethodCall, result: Result) {
-    if (activity == null) {
-      result.success(null)
-      return
-    }
+  private fun getData(call: MethodCall, result: MethodChannel.Result) {
+    val activity = attachedActivity ?: return result.success(null)
 
+    // Get call arguments
     val type = HealthDataType.fromString(call.argument<String>("dataTypeKey")!!)
     val startTime = call.argument<Long>("startTime")!!
     val endTime = call.argument<Long>("endTime")!!
 
-    val typesBuilder = FitnessOptions.builder()
-    typesBuilder.addDataType(type.dataType)
-
-    // Add special cases for accessing workouts or sleep data.
+    // Build FitnessOptions, adding special cases for accessing workouts or sleep data.
+    val fitnessOptionsBuilder = FitnessOptions.builder()
+    fitnessOptionsBuilder.addDataType(type.dataType)
     if (type.dataType == DataType.TYPE_SLEEP_SEGMENT) {
-      typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
+      fitnessOptionsBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
     } else if (type.dataType == DataType.TYPE_ACTIVITY_SEGMENT) {
-      typesBuilder.accessActivitySessions(FitnessOptions.ACCESS_READ)
-        .addDataType(DataType.TYPE_CALORIES_EXPENDED, FitnessOptions.ACCESS_READ)
-        .addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_READ)
+      fitnessOptionsBuilder.accessActivitySessions(FitnessOptions.ACCESS_READ)
+      fitnessOptionsBuilder.addDataType(DataType.TYPE_CALORIES_EXPENDED, FitnessOptions.ACCESS_READ)
+      fitnessOptionsBuilder.addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_READ)
     }
-    val fitnessOptions = typesBuilder.build()
+    val fitnessOptions = fitnessOptionsBuilder.build()
 
-    val googleSignInAccount =
-      GoogleSignIn.getAccountForExtension(activity!!.applicationContext, fitnessOptions)
+    val account = GoogleSignIn.getAccountForExtension(activity.applicationContext, fitnessOptions)
+
     // Handle data types
     when (type.dataType) {
       DataType.TYPE_SLEEP_SEGMENT -> {
-        // request to the sessions for sleep data
-        val request = SessionReadRequest.Builder()
-          .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-          .enableServerQueries()
-          .readSessionsFromAllApps()
-          .includeSleepSessions()
-          .build()
-        Fitness.getSessionsClient(activity!!.applicationContext, googleSignInAccount)
-          .readSession(request)
-          .addOnSuccessListener(threadPoolExecutor!!, sleepDataHandler(type, result))
+        Fitness.getSessionsClient(activity.applicationContext, account)
+          .readSession(
+            SessionReadRequest.Builder()
+              .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
+              .enableServerQueries()
+              .readSessionsFromAllApps()
+              .includeSleepSessions()
+              .build()
+          )
+          .addOnSuccessListener(threadPoolExecutor, sleepDataHandler(type, result))
           .addOnFailureListener(errHandler(result))
-
       }
       DataType.TYPE_ACTIVITY_SEGMENT -> {
-        val readRequest: SessionReadRequest
-        val readRequestBuilder = SessionReadRequest.Builder()
-            .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-            .enableServerQueries()
-            .readSessionsFromAllApps()
-            .includeActivitySessions()
-            .read(type.dataType)
-            .read(DataType.TYPE_CALORIES_EXPENDED)
-
-        // If fine location is enabled, read distance data
-        if (ContextCompat.checkSelfPermission(
-            activity!!.applicationContext,
-            android.Manifest.permission.ACCESS_FINE_LOCATION
-          ) == PackageManager.PERMISSION_GRANTED
-        ) {
-          // Request permission with distance data. 
-          // Google Fit requires this when we query for distance data
-          // as it is restricted data
-          if (!GoogleSignIn.hasPermissions(googleSignInAccount, fitnessOptions)) {
-            GoogleSignIn.requestPermissions(
-              activity!!, // your activity
-              HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
-              googleSignInAccount,
-              fitnessOptions
-            )
-          }
-          readRequestBuilder.read(DataType.TYPE_DISTANCE_DELTA)
-        } 
-        readRequest = readRequestBuilder.build()
-        Fitness.getSessionsClient(activity!!.applicationContext, googleSignInAccount)
-          .readSession(readRequest)
-          .addOnSuccessListener(threadPoolExecutor!!, workoutDataHandler(type, result))
+        Fitness.getSessionsClient(activity.applicationContext, account)
+          .readSession(
+            SessionReadRequest.Builder()
+              .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
+              .enableServerQueries()
+              .readSessionsFromAllApps()
+              .includeActivitySessions()
+              .readIfGranted(activity.applicationContext, type.dataType)
+              .readIfGranted(activity.applicationContext, DataType.TYPE_CALORIES_EXPENDED)
+              .readIfGranted(activity.applicationContext, DataType.TYPE_DISTANCE_DELTA)
+              .build()
+          )
+          .addOnSuccessListener(threadPoolExecutor, workoutDataHandler(type, result))
           .addOnFailureListener(errHandler(result))
       }
       else -> {
-        Fitness.getHistoryClient(activity!!.applicationContext, googleSignInAccount)
+        Fitness.getHistoryClient(activity.applicationContext, account)
           .readData(
             DataReadRequest.Builder()
-              .read(type.dataType)
+              .readIfGranted(activity.applicationContext, type.dataType)
               .setTimeRange(startTime, endTime, TimeUnit.MILLISECONDS)
               .build()
           )
-          .addOnSuccessListener(threadPoolExecutor!!, dataHandler(type, result))
+          .addOnSuccessListener(threadPoolExecutor, dataHandler(type, result))
           .addOnFailureListener(errHandler(result))
       }
     }
-
   }
 
-  private fun dataHandler(type: HealthDataType, result: Result) =
+  private fun dataHandler(type: HealthDataType, result: MethodChannel.Result) =
     OnSuccessListener { response: DataReadResponse ->
       /// Fetch all data points for the specified DataType
       val dataSet = response.getDataSet(type.dataType)
@@ -445,16 +428,16 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           "source_id" to source.streamIdentifier
         )
       }
-      activity!!.runOnUiThread { result.success(healthData) }
+      attachedActivity?.runOnUiThread { result.success(healthData) }
     }
 
-  private fun errHandler(result: Result) = OnFailureListener { exception ->
-    activity!!.runOnUiThread { result.success(null) }
+  private fun errHandler(result: MethodChannel.Result) = OnFailureListener { exception ->
+    attachedActivity?.runOnUiThread { result.success(null) }
     Log.i("FLUTTER_HEALTH::ERROR", exception.message ?: "unknown error")
     Log.i("FLUTTER_HEALTH::ERROR", exception.stackTrace.toString())
   }
 
-  private fun sleepDataHandler(type: HealthDataType, result: Result) =
+  private fun sleepDataHandler(type: HealthDataType, result: MethodChannel.Result) =
     OnSuccessListener { response: SessionReadResponse ->
       val healthData: MutableList<Map<String, Any?>> = mutableListOf()
       for (session in response.sessions) {
@@ -481,21 +464,16 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
             for (dataSet in dataSets) {
               for (dataPoint in dataSet.dataPoints) {
                 // searching OUT OF BED data
-                if (dataPoint.getValue(Field.FIELD_SLEEP_SEGMENT_TYPE)
-                    .asInt() != 3
-                ) {
+                if (dataPoint.getValue(Field.FIELD_SLEEP_SEGMENT_TYPE).asInt() != 3) {
+                  val source = dataPoint.originalDataSource
                   healthData.add(
                     hashMapOf(
-                      "value" to dataPoint.getEndTime(TimeUnit.MINUTES) - dataPoint.getStartTime(
-                        TimeUnit.MINUTES
-                      ),
+                      "value" to dataPoint.getEndTime(TimeUnit.MINUTES) - dataPoint.getStartTime(TimeUnit.MINUTES),
                       "date_from" to dataPoint.getStartTime(TimeUnit.MILLISECONDS),
                       "date_to" to dataPoint.getEndTime(TimeUnit.MILLISECONDS),
                       "unit" to "MINUTES",
-                      "source_name" to (dataPoint.originalDataSource.appPackageName
-                        ?: (dataPoint.originalDataSource.device?.model
-                          ?: "unknown")),
-                      "source_id" to dataPoint.originalDataSource.streamIdentifier
+                      "source_name" to (source.appPackageName ?: source.device?.model ?: "unknown"),
+                      "source_id" to source.streamIdentifier
                     )
                   )
                 }
@@ -504,9 +482,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           } else {
             healthData.add(
               hashMapOf(
-                "value" to session.getEndTime(TimeUnit.MINUTES) - session.getStartTime(
-                  TimeUnit.MINUTES
-                ),
+                "value" to session.getEndTime(TimeUnit.MINUTES) - session.getStartTime(TimeUnit.MINUTES),
                 "date_from" to session.getStartTime(TimeUnit.MILLISECONDS),
                 "date_to" to session.getEndTime(TimeUnit.MILLISECONDS),
                 "unit" to "MINUTES",
@@ -523,18 +499,15 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
             for (dataPoint in dataSet.dataPoints) {
               // searching SLEEP AWAKE data
               if (dataPoint.getValue(Field.FIELD_SLEEP_SEGMENT_TYPE).asInt() == 1) {
+                val source = dataPoint.originalDataSource
                 healthData.add(
                   hashMapOf(
-                    "value" to dataPoint.getEndTime(TimeUnit.MINUTES) - dataPoint.getStartTime(
-                      TimeUnit.MINUTES
-                    ),
+                    "value" to dataPoint.getEndTime(TimeUnit.MINUTES) - dataPoint.getStartTime(TimeUnit.MINUTES),
                     "date_from" to dataPoint.getStartTime(TimeUnit.MILLISECONDS),
                     "date_to" to dataPoint.getEndTime(TimeUnit.MILLISECONDS),
                     "unit" to "MINUTES",
-                    "source_name" to (dataPoint.originalDataSource.appPackageName
-                      ?: (dataPoint.originalDataSource.device?.model
-                        ?: "unknown")),
-                    "source_id" to dataPoint.originalDataSource.streamIdentifier
+                    "source_name" to (source.appPackageName ?: source.device?.model ?: "unknown"),
+                    "source_id" to source.streamIdentifier
                   )
                 )
               }
@@ -542,10 +515,10 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           }
         }
       }
-      activity!!.runOnUiThread { result.success(healthData) }
+      attachedActivity?.runOnUiThread { result.success(healthData) }
     }
 
-  private fun workoutDataHandler(type: HealthDataType, result: Result) =
+  private fun workoutDataHandler(type: HealthDataType, result: MethodChannel.Result) =
     OnSuccessListener { response: SessionReadResponse ->
       val healthData: MutableList<Map<String, Any?>> = mutableListOf()
       for (session in response.sessions) {
@@ -579,95 +552,14 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           )
         )
       }
-      activity!!.runOnUiThread { result.success(healthData) }
+      attachedActivity?.runOnUiThread { result.success(healthData) }
     }
 
-  private fun callToHealthTypes(call: MethodCall): FitnessOptions {
-    val typesBuilder = FitnessOptions.builder()
-    val types = call.argument<List<String>>("types")!!.map(HealthDataType::fromString)
-    val permissions = call.argument<List<Int>>("permissions")!!
-    assert(types.count() == permissions.count())
-
-    for ((i, typeKey) in types.withIndex()) {
-      val access = permissions[i]
-      when (access) {
-        0 -> typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_READ)
-        1 -> typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_WRITE)
-        2 -> {
-          typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_READ)
-          typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_WRITE)
-        }
-        else -> throw IllegalArgumentException("Unknown access type $access")
-      }
-      if (typeKey == HealthDataType.SLEEP_ASLEEP || typeKey == HealthDataType.SLEEP_AWAKE || typeKey == HealthDataType.SLEEP_IN_BED || typeKey == HealthDataType.WORKOUT) {
-        typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
-        when (access) {
-          0 -> typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
-          1 -> typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_WRITE)
-          2 -> {
-            typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
-            typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_WRITE)
-          }
-          else -> throw IllegalArgumentException("Unknown access type $access")
-        }
-      }
-
-    }
-    return typesBuilder.build()
-  }
-
-  private fun hasPermissions(call: MethodCall, result: Result) {
-
-    if (activity == null) {
-      result.success(false)
-      return
-    }
-
-    val optionsToRegister = callToHealthTypes(call)
-    mResult = result
-
-    val isGranted = GoogleSignIn.hasPermissions(
-      GoogleSignIn.getLastSignedInAccount(activity!!),
-      optionsToRegister
-    )
-
-    mResult?.success(isGranted)
-  }
-
-  /// Called when the "requestAuthorization" is invoked from Flutter
-  private fun requestAuthorization(call: MethodCall, result: Result) {
-    if (activity == null) {
-      result.success(false)
-      return
-    }
-
-    val optionsToRegister = callToHealthTypes(call)
-    mResult = result
-
-    val isGranted = GoogleSignIn.hasPermissions(
-      GoogleSignIn.getLastSignedInAccount(activity!!),
-      optionsToRegister
-    )
-    /// Not granted? Ask for permission
-    if (!isGranted && activity != null) {
-      GoogleSignIn.requestPermissions(
-        activity!!,
-        HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
-        GoogleSignIn.getLastSignedInAccount(activity!!),
-        optionsToRegister
-      )
-    }
-    /// Permission already granted
-    else {
-      mResult?.success(true)
-    }
-  }
-
-  private fun getTotalStepsInInterval(call: MethodCall, result: Result) {
+  private fun getTotalStepsInInterval(call: MethodCall, result: MethodChannel.Result) {
     val start = call.argument<Long>("startTime")!!
     val end = call.argument<Long>("endTime")!!
 
-    val activity = activity ?: return
+    val activity = attachedActivity ?: return
 
     val stepsDataType = keyToHealthDataType(STEPS)
     val aggregatedDataType = keyToHealthDataType(AGGREGATE_STEP_COUNT)
@@ -695,19 +587,14 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
     Fitness.getHistoryClient(activity, gsa).readData(request)
       .addOnFailureListener(errHandler(result))
-      .addOnSuccessListener(
-        threadPoolExecutor!!,
-        getStepsInRange(start, end, aggregatedDataType, result)
-      )
-
+      .addOnSuccessListener(threadPoolExecutor, getStepsInRange(start, end, aggregatedDataType, result))
   }
-
 
   private fun getStepsInRange(
     start: Long,
     end: Long,
     aggregatedDataType: DataType,
-    result: Result
+    result: MethodChannel.Result
   ) =
     OnSuccessListener { response: DataReadResponse ->
 
@@ -732,44 +619,6 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       }
 
       assert(map.size <= 1) { "getTotalStepsInInterval should return only one interval. Found: ${map.size}" }
-      activity!!.runOnUiThread {
-        result.success(map.values.firstOrNull())
-      }
+      attachedActivity?.runOnUiThread { result.success(map.values.firstOrNull()) }
     }
-
-  /// Handle calls from the MethodChannel
-  override fun onMethodCall(call: MethodCall, result: Result) {
-    when (call.method) {
-      "requestAuthorization" -> requestAuthorization(call, result)
-      "getData" -> getData(call, result)
-      "writeData" -> writeData(call, result)
-      "getTotalStepsInInterval" -> getTotalStepsInInterval(call, result)
-      "hasPermissions" -> hasPermissions(call, result)
-      "writeWorkoutData" -> writeWorkoutData(call, result)
-      else -> result.notImplemented()
-    }
-  }
-
-  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-    if (channel == null) {
-      return
-    }
-    binding.addActivityResultListener(this)
-    activity = binding.activity
-  }
-
-  override fun onDetachedFromActivityForConfigChanges() {
-    onDetachedFromActivity()
-  }
-
-  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-    onAttachedToActivity(binding)
-  }
-
-  override fun onDetachedFromActivity() {
-    if (channel == null) {
-      return
-    }
-    activity = null
-  }
 }

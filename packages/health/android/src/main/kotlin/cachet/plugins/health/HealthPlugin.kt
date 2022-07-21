@@ -28,7 +28,6 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 import io.flutter.plugin.common.PluginRegistry.Registrar
-import java.security.Permission
 import java.util.*
 import java.util.concurrent.*
 
@@ -43,26 +42,6 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   private var handler: Handler? = null
   private var activity: Activity? = null
   private var threadPoolExecutor: ExecutorService? = null
-
-  private var BODY_FAT_PERCENTAGE = "BODY_FAT_PERCENTAGE"
-  private var HEIGHT = "HEIGHT"
-  private var WEIGHT = "WEIGHT"
-  private var STEPS = "STEPS"
-  private var AGGREGATE_STEP_COUNT = "AGGREGATE_STEP_COUNT"
-  private var ACTIVE_ENERGY_BURNED = "ACTIVE_ENERGY_BURNED"
-  private var HEART_RATE = "HEART_RATE"
-  private var BODY_TEMPERATURE = "BODY_TEMPERATURE"
-  private var BLOOD_PRESSURE_SYSTOLIC = "BLOOD_PRESSURE_SYSTOLIC"
-  private var BLOOD_PRESSURE_DIASTOLIC = "BLOOD_PRESSURE_DIASTOLIC"
-  private var BLOOD_OXYGEN = "BLOOD_OXYGEN"
-  private var BLOOD_GLUCOSE = "BLOOD_GLUCOSE"
-  private var MOVE_MINUTES = "MOVE_MINUTES"
-  private var DISTANCE_DELTA = "DISTANCE_DELTA"
-  private var WATER = "WATER"
-  private var SLEEP_ASLEEP = "SLEEP_ASLEEP"
-  private var SLEEP_AWAKE = "SLEEP_AWAKE"
-  private var SLEEP_IN_BED = "SLEEP_IN_BED"
-  private var WORKOUT = "WORKOUT"
 
   val workoutTypeMap = mapOf(
     "AEROBICS" to FitnessActivities.AEROBICS,
@@ -177,7 +156,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     channel = null
     activity = null
-    threadPoolExecutor!!.shutdown()
+    threadPoolExecutor?.shutdown()
     threadPoolExecutor = null
   }
 
@@ -252,55 +231,6 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
   private var mResult: Result? = null
 
-  private fun keyToHealthDataType(type: String): DataType {
-    return when (type) {
-      BODY_FAT_PERCENTAGE -> DataType.TYPE_BODY_FAT_PERCENTAGE
-      HEIGHT -> DataType.TYPE_HEIGHT
-      WEIGHT -> DataType.TYPE_WEIGHT
-      STEPS -> DataType.TYPE_STEP_COUNT_DELTA
-      AGGREGATE_STEP_COUNT -> DataType.AGGREGATE_STEP_COUNT_DELTA
-      ACTIVE_ENERGY_BURNED -> DataType.TYPE_CALORIES_EXPENDED
-      HEART_RATE -> DataType.TYPE_HEART_RATE_BPM
-      BODY_TEMPERATURE -> HealthDataTypes.TYPE_BODY_TEMPERATURE
-      BLOOD_PRESSURE_SYSTOLIC -> HealthDataTypes.TYPE_BLOOD_PRESSURE
-      BLOOD_PRESSURE_DIASTOLIC -> HealthDataTypes.TYPE_BLOOD_PRESSURE
-      BLOOD_OXYGEN -> HealthDataTypes.TYPE_OXYGEN_SATURATION
-      BLOOD_GLUCOSE -> HealthDataTypes.TYPE_BLOOD_GLUCOSE
-      MOVE_MINUTES -> DataType.TYPE_MOVE_MINUTES
-      DISTANCE_DELTA -> DataType.TYPE_DISTANCE_DELTA
-      WATER -> DataType.TYPE_HYDRATION
-      SLEEP_ASLEEP -> DataType.TYPE_SLEEP_SEGMENT
-      SLEEP_AWAKE -> DataType.TYPE_SLEEP_SEGMENT
-      SLEEP_IN_BED -> DataType.TYPE_SLEEP_SEGMENT
-      WORKOUT -> DataType.TYPE_ACTIVITY_SEGMENT
-      else -> throw IllegalArgumentException("Unsupported dataType: $type")
-    }
-  }
-
-  private fun getField(type: String): Field {
-    return when (type) {
-      BODY_FAT_PERCENTAGE -> Field.FIELD_PERCENTAGE
-      HEIGHT -> Field.FIELD_HEIGHT
-      WEIGHT -> Field.FIELD_WEIGHT
-      STEPS -> Field.FIELD_STEPS
-      ACTIVE_ENERGY_BURNED -> Field.FIELD_CALORIES
-      HEART_RATE -> Field.FIELD_BPM
-      BODY_TEMPERATURE -> HealthFields.FIELD_BODY_TEMPERATURE
-      BLOOD_PRESSURE_SYSTOLIC -> HealthFields.FIELD_BLOOD_PRESSURE_SYSTOLIC
-      BLOOD_PRESSURE_DIASTOLIC -> HealthFields.FIELD_BLOOD_PRESSURE_DIASTOLIC
-      BLOOD_OXYGEN -> HealthFields.FIELD_OXYGEN_SATURATION
-      BLOOD_GLUCOSE -> HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
-      MOVE_MINUTES -> Field.FIELD_DURATION
-      DISTANCE_DELTA -> Field.FIELD_DISTANCE
-      WATER -> Field.FIELD_VOLUME
-      SLEEP_ASLEEP -> Field.FIELD_SLEEP_SEGMENT_TYPE
-      SLEEP_AWAKE -> Field.FIELD_SLEEP_SEGMENT_TYPE
-      SLEEP_IN_BED -> Field.FIELD_SLEEP_SEGMENT_TYPE
-      WORKOUT -> Field.FIELD_ACTIVITY
-      else -> throw IllegalArgumentException("Unsupported dataType: $type")
-    }
-  }
-
   private fun isIntField(dataSource: DataSource, unit: Field): Boolean {
     val dataPoint = DataPoint.builder(dataSource).build()
     val value = dataPoint.getValue(unit)
@@ -328,20 +258,16 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       return
     }
 
-    val type = call.argument<String>("dataTypeKey")!!
+    val type = HealthDataType.fromString(call.argument<String>("dataTypeKey")!!)
     val startTime = call.argument<Long>("startTime")!!
     val endTime = call.argument<Long>("endTime")!!
     val value = call.argument<Float>("value")!!
 
-    // Look up data type and unit for the type key
-    val dataType = keyToHealthDataType(type)
-    val field = getField(type)
-
     val typesBuilder = FitnessOptions.builder()
-    typesBuilder.addDataType(dataType, FitnessOptions.ACCESS_WRITE)
+    typesBuilder.addDataType(type.dataType, FitnessOptions.ACCESS_WRITE)
 
     val dataSource = DataSource.Builder()
-      .setDataType(dataType)
+      .setDataType(type.dataType)
       .setType(DataSource.TYPE_RAW)
       .setDevice(Device.getLocalDevice(activity!!.applicationContext))
       .setAppPackageName(activity!!.applicationContext)
@@ -356,17 +282,17 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
     // Conversion is needed because glucose is stored as mmoll in Google Fit;
     // while mgdl is used for glucose in this plugin.
-    val isGlucose = field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
-    val dataPoint = if (!isIntField(dataSource, field))
-      builder.setField(field, (if (!isGlucose) value else (value / MMOLL_2_MGDL).toFloat()))
+    val isGlucose = type.field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
+    val dataPoint = if (!isIntField(dataSource, type.field))
+      builder.setField(type.field, (if (!isGlucose) value else (value / MMOLL_2_MGDL).toFloat()))
         .build() else
-      builder.setField(field, value.toInt()).build()
+      builder.setField(type.field, value.toInt()).build()
 
     val dataSet = DataSet.builder(dataSource)
       .add(dataPoint)
       .build()
 
-    if (dataType == DataType.TYPE_SLEEP_SEGMENT) {
+    if (type.dataType == DataType.TYPE_SLEEP_SEGMENT) {
       typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
     }
     val fitnessOptions = typesBuilder.build()
@@ -527,19 +453,17 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       return
     }
 
-    val type = call.argument<String>("dataTypeKey")!!
+    val type = HealthDataType.fromString(call.argument<String>("dataTypeKey")!!)
     val startTime = call.argument<Long>("startTime")!!
     val endTime = call.argument<Long>("endTime")!!
-    // Look up data type and unit for the type key
-    val dataType = keyToHealthDataType(type)
-    val field = getField(type)
+
     val typesBuilder = FitnessOptions.builder()
-    typesBuilder.addDataType(dataType)
+    typesBuilder.addDataType(type.dataType)
 
     // Add special cases for accessing workouts or sleep data.
-    if (dataType == DataType.TYPE_SLEEP_SEGMENT) {
+    if (type.dataType == DataType.TYPE_SLEEP_SEGMENT) {
       typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
-    } else if (dataType == DataType.TYPE_ACTIVITY_SEGMENT) {
+    } else if (type.dataType == DataType.TYPE_ACTIVITY_SEGMENT) {
       typesBuilder.accessActivitySessions(FitnessOptions.ACCESS_READ)
         .addDataType(DataType.TYPE_CALORIES_EXPENDED, FitnessOptions.ACCESS_READ)
         .addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_READ)
@@ -549,7 +473,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     val googleSignInAccount =
       GoogleSignIn.getAccountForExtension(activity!!.applicationContext, fitnessOptions)
     // Handle data types
-    when (dataType) {
+    when (type.dataType) {
       DataType.TYPE_SLEEP_SEGMENT -> {
         // request to the sessions for sleep data
         val request = SessionReadRequest.Builder()
@@ -571,7 +495,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
             .enableServerQueries()
             .readSessionsFromAllApps()
             .includeActivitySessions()
-            .read(dataType)
+            .read(type.dataType)
             .read(DataType.TYPE_CALORIES_EXPENDED)
 
         // If fine location is enabled, read distance data
@@ -603,31 +527,30 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
         Fitness.getHistoryClient(activity!!.applicationContext, googleSignInAccount)
           .readData(
             DataReadRequest.Builder()
-              .read(dataType)
+              .read(type.dataType)
               .setTimeRange(startTime, endTime, TimeUnit.MILLISECONDS)
               .build()
           )
-          .addOnSuccessListener(threadPoolExecutor!!, dataHandler(dataType, field, result))
+          .addOnSuccessListener(threadPoolExecutor!!, dataHandler(type, result))
           .addOnFailureListener(errHandler(result))
       }
     }
 
   }
 
-  private fun dataHandler(dataType: DataType, field: Field, result: Result) =
+  private fun dataHandler(type: HealthDataType, result: Result) =
     OnSuccessListener { response: DataReadResponse ->
       /// Fetch all data points for the specified DataType
-      val dataSet = response.getDataSet(dataType)
+      val dataSet = response.getDataSet(type.dataType)
       /// For each data point, extract the contents and send them to Flutter, along with date and unit.
       val healthData = dataSet.dataPoints.mapIndexed { _, dataPoint ->
-        return@mapIndexed hashMapOf(
-          "value" to getHealthDataValue(dataPoint, field),
+        val source = dataPoint.originalDataSource
+        hashMapOf(
+          "value" to getHealthDataValue(dataPoint, type.field),
           "date_from" to dataPoint.getStartTime(TimeUnit.MILLISECONDS),
           "date_to" to dataPoint.getEndTime(TimeUnit.MILLISECONDS),
-          "source_name" to (dataPoint.originalDataSource.appPackageName
-            ?: (dataPoint.originalDataSource.device?.model
-              ?: "")),
-          "source_id" to dataPoint.originalDataSource.streamIdentifier
+          "source_name" to (source.appPackageName ?: source.device?.model ?: ""),
+          "source_id" to source.streamIdentifier
         )
       }
       activity!!.runOnUiThread { result.success(healthData) }
@@ -639,13 +562,13 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     Log.i("FLUTTER_HEALTH::ERROR", exception.stackTrace.toString())
   }
 
-  private fun sleepDataHandler(type: String, result: Result) =
+  private fun sleepDataHandler(type: HealthDataType, result: Result) =
     OnSuccessListener { response: SessionReadResponse ->
       val healthData: MutableList<Map<String, Any?>> = mutableListOf()
       for (session in response.sessions) {
 
         // Return sleep time in Minutes if requested ASLEEP data
-        if (type == SLEEP_ASLEEP) {
+        if (type == HealthDataType.SLEEP_ASLEEP) {
           healthData.add(
             hashMapOf(
               "value" to session.getEndTime(TimeUnit.MINUTES) - session.getStartTime(TimeUnit.MINUTES),
@@ -658,7 +581,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           )
         }
 
-        if (type == SLEEP_IN_BED) {
+        if (type == HealthDataType.SLEEP_IN_BED) {
           val dataSets = response.getDataSet(session)
 
           // If the sleep session has finer granularity sub-components, extract them:
@@ -702,7 +625,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           }
         }
 
-        if (type == SLEEP_AWAKE) {
+        if (type == HealthDataType.SLEEP_AWAKE) {
           val dataSets = response.getDataSet(session)
           for (dataSet in dataSets) {
             for (dataPoint in dataSet.dataPoints) {
@@ -730,7 +653,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       activity!!.runOnUiThread { result.success(healthData) }
     }
 
-  private fun workoutDataHandler(type: String, result: Result) =
+  private fun workoutDataHandler(type: HealthDataType, result: Result) =
     OnSuccessListener { response: SessionReadResponse ->
       val healthData: MutableList<Map<String, Any?>> = mutableListOf()
       for (session in response.sessions) {
@@ -769,27 +692,22 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
   private fun callToHealthTypes(call: MethodCall): FitnessOptions {
     val typesBuilder = FitnessOptions.builder()
-    val args = call.arguments as HashMap<*, *>
-    val types = (args["types"] as? ArrayList<*>)?.filterIsInstance<String>()
-    val permissions = (args["permissions"] as? ArrayList<*>)?.filterIsInstance<Int>()
-
-    assert(types != null)
-    assert(permissions != null)
-    assert(types!!.count() == permissions!!.count())
+    val types = call.argument<List<String>>("types")!!.map(HealthDataType::fromString)
+    val permissions = call.argument<List<Int>>("permissions")!!
+    assert(types.count() == permissions.count())
 
     for ((i, typeKey) in types.withIndex()) {
       val access = permissions[i]
-      val dataType = keyToHealthDataType(typeKey)
       when (access) {
-        0 -> typesBuilder.addDataType(dataType, FitnessOptions.ACCESS_READ)
-        1 -> typesBuilder.addDataType(dataType, FitnessOptions.ACCESS_WRITE)
+        0 -> typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_READ)
+        1 -> typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_WRITE)
         2 -> {
-          typesBuilder.addDataType(dataType, FitnessOptions.ACCESS_READ)
-          typesBuilder.addDataType(dataType, FitnessOptions.ACCESS_WRITE)
+          typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_READ)
+          typesBuilder.addDataType(typeKey.dataType, FitnessOptions.ACCESS_WRITE)
         }
         else -> throw IllegalArgumentException("Unknown access type $access")
       }
-      if (typeKey == SLEEP_ASLEEP || typeKey == SLEEP_AWAKE || typeKey == SLEEP_IN_BED || typeKey == WORKOUT) {
+      if (typeKey == HealthDataType.SLEEP_ASLEEP || typeKey == HealthDataType.SLEEP_AWAKE || typeKey == HealthDataType.SLEEP_IN_BED || typeKey == HealthDataType.WORKOUT) {
         typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)
         when (access) {
           0 -> typesBuilder.accessSleepSessions(FitnessOptions.ACCESS_READ)

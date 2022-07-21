@@ -32,10 +32,6 @@ import java.util.*
 import java.util.concurrent.*
 
 
-const val GOOGLE_FIT_PERMISSIONS_REQUEST_CODE = 1111
-const val CHANNEL_NAME = "flutter_health"
-const val MMOLL_2_MGDL = 18.0 // 1 mmoll= 18 mgdl
-
 class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandler,
   ActivityResultListener, Result, ActivityAware, FlutterPlugin {
   private var result: Result? = null
@@ -43,112 +39,8 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   private var activity: Activity? = null
   private var threadPoolExecutor: ExecutorService? = null
 
-  val workoutTypeMap = mapOf(
-    "AEROBICS" to FitnessActivities.AEROBICS,
-    "AMERICAN_FOOTBALL" to FitnessActivities.FOOTBALL_AMERICAN,
-    "ARCHERY" to FitnessActivities.ARCHERY,
-    "AUSTRALIAN_FOOTBALL" to FitnessActivities.FOOTBALL_AUSTRALIAN,
-    "BADMINTON" to FitnessActivities.BADMINTON,
-    "BASEBALL" to FitnessActivities.BASEBALL,
-    "BASKETBALL" to FitnessActivities.BASKETBALL,
-    "BIATHLON" to FitnessActivities.BIATHLON,
-    "BIKING" to FitnessActivities.BIKING,
-    "BOXING" to FitnessActivities.BOXING,
-    "CALISTHENICS" to FitnessActivities.CALISTHENICS,
-    "CIRCUIT_TRAINING" to FitnessActivities.CIRCUIT_TRAINING,
-    "CRICKET" to FitnessActivities.CRICKET,
-    "CROSS_COUNTRY_SKIING" to FitnessActivities.SKIING_CROSS_COUNTRY,
-    "CROSS_FIT" to FitnessActivities.CROSSFIT,
-    "CURLING" to FitnessActivities.CURLING,
-    "DANCING" to FitnessActivities.DANCING,
-    "DIVING" to FitnessActivities.DIVING,
-    "DOWNHILL_SKIING" to FitnessActivities.SKIING_DOWNHILL,
-    "ELEVATOR" to FitnessActivities.ELEVATOR,
-    "ELLIPTICAL" to FitnessActivities.ELLIPTICAL,
-    "ERGOMETER" to FitnessActivities.ERGOMETER,
-    "ESCALATOR" to FitnessActivities.ESCALATOR,
-    "FENCING" to FitnessActivities.FENCING,
-    "FRISBEE_DISC" to FitnessActivities.FRISBEE_DISC,
-    "GARDENING" to FitnessActivities.GARDENING,
-    "GOLF" to FitnessActivities.GOLF,
-    "GUIDED_BREATHING" to FitnessActivities.GUIDED_BREATHING,
-    "GYMNASTICS" to FitnessActivities.GYMNASTICS,
-    "HANDBALL" to FitnessActivities.HANDBALL,
-    "HIGH_INTENSITY_INTERVAL_TRAINING" to FitnessActivities.HIGH_INTENSITY_INTERVAL_TRAINING,
-    "HIKING" to FitnessActivities.HIKING,
-    "HOCKEY" to FitnessActivities.HOCKEY,
-    "HORSEBACK_RIDING" to FitnessActivities.HORSEBACK_RIDING,
-    "HOUSEWORK" to FitnessActivities.HOUSEWORK,
-    "IN_VEHICLE" to FitnessActivities.IN_VEHICLE,
-    "INTERVAL_TRAINING" to FitnessActivities.INTERVAL_TRAINING,
-    "JUMP_ROPE" to FitnessActivities.JUMP_ROPE,
-    "KAYAKING" to FitnessActivities.KAYAKING,
-    "KETTLEBELL_TRAINING" to FitnessActivities.KETTLEBELL_TRAINING,
-    "KICK_SCOOTER" to FitnessActivities.KICK_SCOOTER,
-    "KICKBOXING" to FitnessActivities.KICKBOXING,
-    "KITE_SURFING" to FitnessActivities.KITESURFING,
-    "MARTIAL_ARTS" to FitnessActivities.MARTIAL_ARTS,
-    "MEDITATION" to FitnessActivities.MEDITATION,
-    "MIXED_MARTIAL_ARTS" to FitnessActivities.MIXED_MARTIAL_ARTS,
-    "P90X" to FitnessActivities.P90X,
-    "PARAGLIDING" to FitnessActivities.PARAGLIDING,
-    "PILATES" to FitnessActivities.PILATES,
-    "POLO" to FitnessActivities.POLO,
-    "RACQUETBALL" to FitnessActivities.RACQUETBALL,
-    "ROCK_CLIMBING" to FitnessActivities.ROCK_CLIMBING,
-    "ROWING" to FitnessActivities.ROWING,
-    "RUGBY" to FitnessActivities.RUGBY,
-    "RUNNING_JOGGING" to FitnessActivities.RUNNING_JOGGING,
-    "RUNNING_SAND" to FitnessActivities.RUNNING_SAND,
-    "RUNNING_TREADMILL" to FitnessActivities.RUNNING_TREADMILL,
-    "RUNNING" to FitnessActivities.RUNNING,
-    "SAILING" to FitnessActivities.SAILING,
-    "SCUBA_DIVING" to FitnessActivities.SCUBA_DIVING,
-    "SKATING_CROSS" to FitnessActivities.SKATING_CROSS,
-    "SKATING_INDOOR" to FitnessActivities.SKATING_INDOOR,
-    "SKATING_INLINE" to FitnessActivities.SKATING_INLINE,
-    "SKATING" to FitnessActivities.SKATING,
-    "SKIING_BACK_COUNTRY" to FitnessActivities.SKIING_BACK_COUNTRY,
-    "SKIING_KITE" to FitnessActivities.SKIING_KITE,
-    "SKIING_ROLLER" to FitnessActivities.SKIING_ROLLER,
-    "SLEDDING" to FitnessActivities.SLEDDING,
-    "SNOWBOARDING" to FitnessActivities.SNOWBOARDING,
-    "SOCCER" to FitnessActivities.FOOTBALL_SOCCER,
-    "SOFTBALL" to FitnessActivities.SOFTBALL,
-    "SQUASH" to FitnessActivities.SQUASH,
-    "STAIR_CLIMBING_MACHINE" to FitnessActivities.STAIR_CLIMBING_MACHINE,
-    "STAIR_CLIMBING" to FitnessActivities.STAIR_CLIMBING,
-    "STANDUP_PADDLEBOARDING" to FitnessActivities.STANDUP_PADDLEBOARDING,
-    "STILL" to FitnessActivities.STILL,
-    "STRENGTH_TRAINING" to FitnessActivities.STRENGTH_TRAINING,
-    "SURFING" to FitnessActivities.SURFING,
-    "SWIMMING_OPEN_WATER" to FitnessActivities.SWIMMING_OPEN_WATER,
-    "SWIMMING_POOL" to FitnessActivities.SWIMMING_POOL,
-    "SWIMMING" to FitnessActivities.SWIMMING,
-    "TABLE_TENNIS" to FitnessActivities.TABLE_TENNIS,
-    "TEAM_SPORTS" to FitnessActivities.TEAM_SPORTS,
-    "TENNIS" to FitnessActivities.TENNIS,
-    "TILTING" to FitnessActivities.TILTING,
-    "VOLLEYBALL_BEACH" to FitnessActivities.VOLLEYBALL_BEACH,
-    "VOLLEYBALL_INDOOR" to FitnessActivities.VOLLEYBALL_INDOOR,
-    "VOLLEYBALL" to FitnessActivities.VOLLEYBALL,
-    "WAKEBOARDING" to FitnessActivities.WAKEBOARDING,
-    "WALKING_FITNESS" to FitnessActivities.WALKING_FITNESS,
-    "WALKING_NORDIC" to FitnessActivities.WALKING_NORDIC,
-    "WALKING_STROLLER" to FitnessActivities.WALKING_STROLLER,
-    "WALKING_TREADMILL" to FitnessActivities.WALKING_TREADMILL,
-    "WALKING" to FitnessActivities.WALKING,
-    "WATER_POLO" to FitnessActivities.WATER_POLO,
-    "WEIGHTLIFTING" to FitnessActivities.WEIGHTLIFTING,
-    "WHEELCHAIR" to FitnessActivities.WHEELCHAIR,
-    "WINDSURFING" to FitnessActivities.WINDSURFING,
-    "YOGA" to FitnessActivities.YOGA,
-    "ZUMBA" to FitnessActivities.ZUMBA,
-    "OTHER" to FitnessActivities.OTHER,
-  )
-
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL_NAME)
+    channel = MethodChannel(flutterPluginBinding.binaryMessenger, HealthConstants.CHANNEL_NAME)
     channel?.setMethodCallHandler(this)
     threadPoolExecutor = Executors.newFixedThreadPool(4)
   }
@@ -173,7 +65,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     @Suppress("unused")
     @JvmStatic
     fun registerWith(registrar: Registrar) {
-      val channel = MethodChannel(registrar.messenger(), CHANNEL_NAME)
+      val channel = MethodChannel(registrar.messenger(), HealthConstants.CHANNEL_NAME)
       val plugin = HealthPlugin(channel)
       registrar.addActivityResultListener(plugin)
       channel.setMethodCallHandler(plugin)
@@ -217,7 +109,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
 
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-    if (requestCode == GOOGLE_FIT_PERMISSIONS_REQUEST_CODE) {
+    if (requestCode == HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE) {
       if (resultCode == Activity.RESULT_OK) {
         Log.d("FLUTTER_HEALTH", "Access Granted!")
         mResult?.success(true)
@@ -244,7 +136,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     // while mgdl is used for glucose in this plugin.
     val isGlucose = field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
     return when (value.format) {
-      Field.FORMAT_FLOAT -> if (!isGlucose) value.asFloat() else value.asFloat() * MMOLL_2_MGDL
+      Field.FORMAT_FLOAT -> if (!isGlucose) value.asFloat() else value.asFloat() * HealthConstants.MMOLL_2_MGDL
       Field.FORMAT_INT32 -> value.asInt()
       Field.FORMAT_STRING -> value.asString()
       else -> Log.e("Unsupported format:", value.format.toString())
@@ -284,7 +176,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     // while mgdl is used for glucose in this plugin.
     val isGlucose = type.field == HealthFields.FIELD_BLOOD_GLUCOSE_LEVEL
     val dataPoint = if (!isIntField(dataSource, type.field))
-      builder.setField(type.field, (if (!isGlucose) value else (value / MMOLL_2_MGDL).toFloat()))
+      builder.setField(type.field, (if (!isGlucose) value else (value / HealthConstants.MMOLL_2_MGDL).toFloat()))
         .build() else
       builder.setField(type.field, value.toInt()).build()
 
@@ -326,7 +218,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     val totalEnergyBurned = call.argument<Int>("totalEnergyBurned")
     val totalDistance = call.argument<Int>("totalDistance")
 
-    val activityType = getActivityType(type)
+    val activityType = HealthConstants.workoutTypeMap[type] ?: FitnessActivities.UNKNOWN
 
     // Create the Activity Segment DataSource
     val activitySegmentDataSource = DataSource.Builder()
@@ -423,7 +315,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       if (!GoogleSignIn.hasPermissions(googleSignInAccount, fitnessOptions)) {
         GoogleSignIn.requestPermissions(
           activity!!,
-          GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
+          HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
           googleSignInAccount,
           fitnessOptions
         )
@@ -510,7 +402,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
           if (!GoogleSignIn.hasPermissions(googleSignInAccount, fitnessOptions)) {
             GoogleSignIn.requestPermissions(
               activity!!, // your activity
-              GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
+              HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
               googleSignInAccount,
               fitnessOptions
             )
@@ -674,7 +566,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
         }
         healthData.add(
           hashMapOf(
-            "workoutActivityType" to workoutTypeMap.filterValues { it == session.activity }.keys.first(),
+            "workoutActivityType" to HealthConstants.workoutTypeMap.filterValues { it == session.activity }.keys.first(),
             "totalEnergyBurned" to if (totalEnergyBurned == 0.0) null else totalEnergyBurned,
             "totalEnergyBurnedUnit" to "KILOCALORIE",
             "totalDistance" to if (totalDistance == 0.0) null else totalDistance,
@@ -760,7 +652,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     if (!isGranted && activity != null) {
       GoogleSignIn.requestPermissions(
         activity!!,
-        GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
+        HealthConstants.GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
         GoogleSignIn.getLastSignedInAccount(activity!!),
         optionsToRegister
       )
@@ -844,10 +736,6 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
         result.success(map.values.firstOrNull())
       }
     }
-
-  private fun getActivityType(type: String): String {
-    return workoutTypeMap[type] ?: FitnessActivities.UNKNOWN
-  }
 
   /// Handle calls from the MethodChannel
   override fun onMethodCall(call: MethodCall, result: Result) {

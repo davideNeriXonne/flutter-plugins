@@ -9,6 +9,7 @@ part of health;
 ///  * reading health data using the [getHealthDataFromTypes] method.
 ///  * writing health data using the [writeHealthData] method.
 ///  * accessing total step counts using the [getTotalStepsInInterval] method.
+///  * accessing total km walking/running using the [getTotalKmInInterval] method.
 ///  * cleaning up dublicate data points via the [removeDuplicates] method.
 class HealthFactory {
   static const MethodChannel _channel = MethodChannel('flutter_health');
@@ -407,6 +408,21 @@ class HealthFactory {
     };
     final stepsCount = await _channel.invokeMethod<int?>(
       'getTotalStepsInInterval',
+      args,
+    );
+    return stepsCount;
+  }
+
+  Future<double?> getTotalKmInInterval(
+    DateTime startTime,
+    DateTime endTime,
+  ) async {
+    final args = <String, dynamic>{
+      'startTime': startTime.millisecondsSinceEpoch,
+      'endTime': endTime.millisecondsSinceEpoch
+    };
+    final stepsCount = await _channel.invokeMethod<double?>(
+      'getTotalKmInInterval',
       args,
     );
     return stepsCount;

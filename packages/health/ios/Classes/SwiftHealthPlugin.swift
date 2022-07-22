@@ -140,6 +140,11 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
             getTotalStepsInInterval(call: call, result: result)
         }
         
+        /// Handle getTotalKmInInterval
+        else if (call.method.elementsEqual("getTotalKmInInterval")){
+            getTotalKmInInterval(call: call, result: result)
+        }
+
         /// Handle writeData
         else if (call.method.elementsEqual("writeData")){
             try! writeData(call: call, result: result)

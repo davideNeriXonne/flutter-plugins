@@ -28,7 +28,6 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 import io.flutter.plugin.common.PluginRegistry.Registrar
-import java.security.Permission
 import java.util.*
 import java.util.concurrent.*
 
@@ -48,6 +47,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   private var HEIGHT = "HEIGHT"
   private var WEIGHT = "WEIGHT"
   private var STEPS = "STEPS"
+  private var AGGREGATE_DISTANCE = "AGGREGATE_DISTANCE"
   private var AGGREGATE_STEP_COUNT = "AGGREGATE_STEP_COUNT"
   private var ACTIVE_ENERGY_BURNED = "ACTIVE_ENERGY_BURNED"
   private var HEART_RATE = "HEART_RATE"
@@ -258,6 +258,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       HEIGHT -> DataType.TYPE_HEIGHT
       WEIGHT -> DataType.TYPE_WEIGHT
       STEPS -> DataType.TYPE_STEP_COUNT_DELTA
+      AGGREGATE_DISTANCE -> DataType.AGGREGATE_DISTANCE_DELTA
       AGGREGATE_STEP_COUNT -> DataType.AGGREGATE_STEP_COUNT_DELTA
       ACTIVE_ENERGY_BURNED -> DataType.TYPE_CALORIES_EXPENDED
       HEART_RATE -> DataType.TYPE_HEART_RATE_BPM
@@ -853,14 +854,21 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
     }
   }
 
-  private fun getTotalStepsInInterval(call: MethodCall, result: Result) {
+  private fun <T> getAggregateInInterval(
+    call: MethodCall,
+    result: Result,
+    typeKey: String,
+    aggregateTypeKey: String,
+    streamName: String,
+    valueMapper: (value: Value) -> T
+  ) {
     val start = call.argument<Long>("startTime")!!
     val end = call.argument<Long>("endTime")!!
 
     val activity = activity ?: return
 
-    val stepsDataType = keyToHealthDataType(STEPS)
-    val aggregatedDataType = keyToHealthDataType(AGGREGATE_STEP_COUNT)
+    val stepsDataType = keyToHealthDataType(typeKey)
+    val aggregatedDataType = keyToHealthDataType(aggregateTypeKey)
 
     val fitnessOptions = FitnessOptions.builder()
       .addDataType(stepsDataType)
@@ -872,7 +880,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       .setAppPackageName("com.google.android.gms")
       .setDataType(stepsDataType)
       .setType(DataSource.TYPE_DERIVED)
-      .setStreamName("estimated_steps")
+      .setStreamName(streamName)
       .build()
 
     val duration = (end - start).toInt()
@@ -887,45 +895,40 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       .addOnFailureListener(errHandler(result))
       .addOnSuccessListener(
         threadPoolExecutor!!,
-        getStepsInRange(start, end, aggregatedDataType, result)
+        aggregateDataHandler(start, end, aggregatedDataType, result, valueMapper)
       )
-
   }
 
-
-  private fun getStepsInRange(
+  private fun <T> aggregateDataHandler(
     start: Long,
     end: Long,
     aggregatedDataType: DataType,
-    result: Result
-  ) =
-    OnSuccessListener { response: DataReadResponse ->
-
-      val map = HashMap<Long, Int>() // need to return to Dart so can't use sparse array
-      for (bucket in response.buckets) {
-        val dp = bucket.dataSets.firstOrNull()?.dataPoints?.firstOrNull()
-        if (dp != null) {
-          print(dp)
-
-          val count = dp.getValue(aggregatedDataType.fields[0])
-
-          val startTime = dp.getStartTime(TimeUnit.MILLISECONDS)
-          val startDate = Date(startTime)
-          val endDate = Date(dp.getEndTime(TimeUnit.MILLISECONDS))
-          Log.i("FLUTTER_HEALTH::SUCCESS", "returning $count steps for $startDate - $endDate")
-          map[startTime] = count.asInt()
-        } else {
-          val startDay = Date(start)
-          val endDay = Date(end)
-          Log.i("FLUTTER_HEALTH::ERROR", "no steps for $startDay - $endDay")
-        }
-      }
-
-      assert(map.size <= 1) { "getTotalStepsInInterval should return only one interval. Found: ${map.size}" }
-      activity!!.runOnUiThread {
-        result.success(map.values.firstOrNull())
+    result: Result,
+    valueMapper: (value: Value) -> T
+  ) = OnSuccessListener<DataReadResponse> {
+    val map = HashMap<Long, T>() // need to return to Dart so can't use sparse array
+    for (bucket in it.buckets) {
+      val dp = bucket.dataSets.firstOrNull()?.dataPoints?.firstOrNull()
+      if (dp != null) {
+        print(dp)
+        val value = dp.getValue(aggregatedDataType.fields[0])
+        val startTime = dp.getStartTime(TimeUnit.MILLISECONDS)
+        val startDate = Date(startTime)
+        val endDate = Date(dp.getEndTime(TimeUnit.MILLISECONDS))
+        Log.i("FLUTTER_HEALTH::SUCCESS", "returning $value ($aggregatedDataType) for $startDate - $endDate")
+        map[startTime] = valueMapper(value)
+      } else {
+        val startDay = Date(start)
+        val endDay = Date(end)
+        Log.i("FLUTTER_HEALTH::ERROR", "no value ($aggregatedDataType) for $startDay - $endDay")
       }
     }
+
+    assert(map.size <= 1) { "getAggregateInInterval should return only one interval. Found: ${map.size}" }
+    activity?.runOnUiThread {
+      result.success(map.values.firstOrNull())
+    }
+  }
 
   private fun getActivityType(type: String): String {
     return workoutTypeMap[type] ?: FitnessActivities.UNKNOWN
@@ -937,7 +940,8 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       "requestAuthorization" -> requestAuthorization(call, result)
       "getData" -> getData(call, result)
       "writeData" -> writeData(call, result)
-      "getTotalStepsInInterval" -> getTotalStepsInInterval(call, result)
+      "getTotalKmInInterval" -> getAggregateInInterval(call, result, DISTANCE_DELTA, AGGREGATE_DISTANCE, "estimated_distance") { it.asFloat() }
+      "getTotalStepsInInterval" -> getAggregateInInterval(call, result, STEPS, AGGREGATE_STEP_COUNT, "estimated_steps") { it.asInt() }
       "hasPermissions" -> hasPermissions(call, result)
       "writeWorkoutData" -> writeWorkoutData(call, result)
       else -> result.notImplemented()

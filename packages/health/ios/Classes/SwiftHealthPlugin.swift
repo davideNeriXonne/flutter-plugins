@@ -538,7 +538,48 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
         
         HKHealthStore().execute(query)
     }
-    
+
+    func getTotalKmInInterval(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let arguments = call.arguments as? NSDictionary
+        let startTime = (arguments?["startTime"] as? NSNumber) ?? 0
+        let endTime = (arguments?["endTime"] as? NSNumber) ?? 0
+        
+        // Convert dates from milliseconds to Date()
+        let dateFrom = Date(timeIntervalSince1970: startTime.doubleValue / 1000)
+        let dateTo = Date(timeIntervalSince1970: endTime.doubleValue / 1000)
+        
+        let sampleType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
+        let predicate = HKQuery.predicateForSamples(withStart: dateFrom, end: dateTo, options: .strictStartDate)
+        
+        let query = HKStatisticsQuery(quantityType: sampleType,
+                                      quantitySamplePredicate: predicate,
+                                      options: .cumulativeSum) { query, queryResult, error in
+            
+            guard let queryResult = queryResult else {
+                let error = error! as NSError
+                print("Error getting total steps in interval \(error.localizedDescription)")
+                
+                DispatchQueue.main.async {
+                    result(nil)
+                }
+                return
+            }
+            
+            var distance = 0.0
+            
+            if let quantity = queryResult.sumQuantity() {
+                let unit = HKUnit.mile()
+                distance = quantity.doubleValue(for: unit)
+            }
+            
+            DispatchQueue.main.async {
+                result(distance)
+            }
+        }
+        
+        HKHealthStore().execute(query)
+    }
+
     func unitLookUp(key: String) -> HKUnit {
         guard let unit = unitDict[key] else {
             return HKUnit.count()

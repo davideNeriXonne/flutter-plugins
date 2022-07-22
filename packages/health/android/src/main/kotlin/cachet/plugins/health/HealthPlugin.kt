@@ -182,13 +182,7 @@ class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAwa
     }
     val fitnessOptions = fitnessOptionsBuilder.build()
 
-    val dataSource = DataSource.Builder()
-      .setDataType(type.dataType)
-      .setType(DataSource.TYPE_RAW)
-      .setDevice(Device.getLocalDevice(appContext))
-      .setAppPackageName(appContext)
-      .build()
-
+    val dataSource = HealthUtil.buildDataSource(appContext, type.dataType)
     val dataPointBuilder = DataPoint.builder(dataSource)
 
     // Set time
@@ -236,102 +230,60 @@ class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAwa
 
     val activityType = HealthConstants.workoutTypeMap[type] ?: FitnessActivities.UNKNOWN
 
-    // Create the Activity Segment DataSource
-    val activitySegmentDataSource = DataSource.Builder()
-      .setAppPackageName(activity.packageName)
-      .setDataType(DataType.TYPE_ACTIVITY_SEGMENT)
-      .setStreamName("FLUTTER_HEALTH - Activity")
-      .setType(DataSource.TYPE_RAW)
-      .build()
-    // Create the Activity Segment
-    val activityDataPoint = DataPoint.builder(activitySegmentDataSource)
-      .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-      .setActivityField(Field.FIELD_ACTIVITY, activityType)
-      .build()
-    // Add DataPoint to DataSet
-    val activitySegments = DataSet.builder(activitySegmentDataSource)
-      .add(activityDataPoint)
-      .build()
-
-    // If distance is provided
-    var distanceDataSet: DataSet? = null
-    if (totalDistance != null) {
-      // Create a data source
-      val distanceDataSource = DataSource.Builder()
-        .setAppPackageName(activity.packageName)
-        .setDataType(DataType.TYPE_DISTANCE_DELTA)
-        .setStreamName("FLUTTER_HEALTH - Distance")
-        .setType(DataSource.TYPE_RAW)
-        .build()
-
-      val distanceDataPoint = DataPoint.builder(distanceDataSource)
-        .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-        .setField(Field.FIELD_DISTANCE, totalDistance.toFloat())
-        .build()
-      // Create a data set
-      distanceDataSet = DataSet.builder(distanceDataSource)
-        .add(distanceDataPoint)
-        .build()
-    }
-    // If energyBurned is provided
-    var energyDataSet: DataSet? = null
-    if (totalEnergyBurned != null) {
-      // Create a data source
-      val energyDataSource = DataSource.Builder()
-        .setAppPackageName(activity.packageName)
-        .setDataType(DataType.TYPE_CALORIES_EXPENDED)
-        .setStreamName("FLUTTER_HEALTH - Calories")
-        .setType(DataSource.TYPE_RAW)
-        .build()
-
-      val energyDataPoint = DataPoint.builder(energyDataSource)
-        .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-        .setField(Field.FIELD_CALORIES, totalEnergyBurned.toFloat())
-        .build()
-      // Create a data set
-      energyDataSet = DataSet.builder(energyDataSource)
-        .add(energyDataPoint)
-        .build()
-    }
-
-    // Finish session setup
-    val session = Session.Builder()
-      .setName(activityType) // TODO: Make a sensible name / allow user to set name
-      .setDescription("")
-      .setIdentifier(UUID.randomUUID().toString())
-      .setActivity(activityType)
-      .setStartTime(startTime, TimeUnit.MILLISECONDS)
-      .setEndTime(endTime, TimeUnit.MILLISECONDS)
-      .build()
-    // Build a session and add the values provided
-    val sessionInsertRequestBuilder = SessionInsertRequest.Builder()
-      .setSession(session)
-      .addDataSet(activitySegments)
-    if (totalDistance != null) {
-      sessionInsertRequestBuilder.addDataSet(distanceDataSet!!)
-    }
-    if (totalEnergyBurned != null) {
-      sessionInsertRequestBuilder.addDataSet(energyDataSet!!)
-    }
-    val insertRequest = sessionInsertRequestBuilder.build()
-
+    // Setup builders
     val fitnessOptionsBuilder = FitnessOptions.builder()
+    val sessionInsertRequestBuilder = SessionInsertRequest.Builder().setSession(
+      Session.Builder()
+        .setName(activityType) // TODO: Make a sensible name / allow user to set name
+        .setDescription("")
+        .setIdentifier(UUID.randomUUID().toString())
+        .setActivity(activityType)
+        .setStartTime(startTime, TimeUnit.MILLISECONDS)
+        .setEndTime(endTime, TimeUnit.MILLISECONDS)
+        .build()
+    )
+
+    // Add activity
     fitnessOptionsBuilder.addDataType(DataType.TYPE_ACTIVITY_SEGMENT, FitnessOptions.ACCESS_WRITE)
+    sessionInsertRequestBuilder.addDataSet(HealthUtil.buildDataSet(
+      activity,
+      DataType.TYPE_ACTIVITY_SEGMENT,
+      startTime, endTime,
+      { setActivityField(Field.FIELD_ACTIVITY, activityType) },
+      "FLUTTER_HEALTH - Activity"
+    ))
+
+    // Add distance if provided
     if (totalDistance != null) {
       fitnessOptionsBuilder.addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_WRITE)
+      sessionInsertRequestBuilder.addDataSet(HealthUtil.buildDataSet(
+        activity,
+        DataType.TYPE_DISTANCE_DELTA,
+        startTime, endTime,
+        { setField(Field.FIELD_DISTANCE, totalDistance.toFloat()) },
+        "FLUTTER_HEALTH - Distance"
+      ))
     }
+
+    // Add energyBurned if provided
     if (totalEnergyBurned != null) {
       fitnessOptionsBuilder.addDataType(DataType.TYPE_CALORIES_EXPENDED, FitnessOptions.ACCESS_WRITE)
+      sessionInsertRequestBuilder.addDataSet(HealthUtil.buildDataSet(
+        activity,
+        DataType.TYPE_CALORIES_EXPENDED,
+        startTime, endTime,
+        { setField(Field.FIELD_CALORIES, totalEnergyBurned.toFloat()) },
+        "FLUTTER_HEALTH - Calories"
+      ))
     }
-    val fitnessOptions = fitnessOptionsBuilder.build()
 
     try {
       Fitness
         .getSessionsClient(
           activity.applicationContext,
-          GoogleSignIn.getAccountForExtension(activity.applicationContext, fitnessOptions)
+          GoogleSignIn.getAccountForExtension(activity.applicationContext, fitnessOptionsBuilder.build())
         )
-        .insertSession(insertRequest)
+        .insertSession(sessionInsertRequestBuilder.build())
         .addOnSuccessListener {
           Log.i("FLUTTER_HEALTH::SUCCESS", "Workout was successfully added!")
           result.success(true)
@@ -418,12 +370,12 @@ class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAwa
       /// Fetch all data points for the specified DataType
       val dataSet = response.getDataSet(type.dataType)
       /// For each data point, extract the contents and send them to Flutter, along with date and unit.
-      val healthData = dataSet.dataPoints.mapIndexed { _, dataPoint ->
-        val source = dataPoint.originalDataSource
+      val healthData = dataSet.dataPoints.map {
+        val source = it.originalDataSource
         hashMapOf(
-          "value" to getHealthDataValue(dataPoint, type.field),
-          "date_from" to dataPoint.getStartTime(TimeUnit.MILLISECONDS),
-          "date_to" to dataPoint.getEndTime(TimeUnit.MILLISECONDS),
+          "value" to getHealthDataValue(it, type.field),
+          "date_from" to it.getStartTime(TimeUnit.MILLISECONDS),
+          "date_to" to it.getEndTime(TimeUnit.MILLISECONDS),
           "source_name" to (source.appPackageName ?: source.device?.model ?: ""),
           "source_id" to source.streamIdentifier
         )
@@ -521,6 +473,7 @@ class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAwa
   private fun workoutDataHandler(type: HealthDataType, result: MethodChannel.Result) =
     OnSuccessListener { response: SessionReadResponse ->
       val healthData: MutableList<Map<String, Any?>> = mutableListOf()
+      val workoutTypeEntries = HealthConstants.workoutTypeMap.entries
       for (session in response.sessions) {
         // Look for calories and distance if they
         var totalEnergyBurned = 0.0
@@ -539,7 +492,7 @@ class HealthPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAwa
         }
         healthData.add(
           hashMapOf(
-            "workoutActivityType" to HealthConstants.workoutTypeMap.filterValues { it == session.activity }.keys.first(),
+            "workoutActivityType" to workoutTypeEntries.first { it.value == session.activity }.key,
             "totalEnergyBurned" to if (totalEnergyBurned == 0.0) null else totalEnergyBurned,
             "totalEnergyBurnedUnit" to "KILOCALORIE",
             "totalDistance" to if (totalDistance == 0.0) null else totalDistance,

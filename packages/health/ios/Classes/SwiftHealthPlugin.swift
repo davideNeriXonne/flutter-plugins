@@ -442,7 +442,7 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
                             let unit = HKUnit.meter()
                             data.append([
                                 "uuid" : "",
-                                "value": result.sumQuantity()?.doubleValue(for: unit) ?? 0,
+                                "value": (result.sumQuantity()?.doubleValue(for: unit) ?? 0)/1000,
                                 "date_from": Int(result.startDate.timeIntervalSince1970 * 1000),
                                 "date_to": data.count == l-1 ? Int(dateTo.timeIntervalSince1970 * 1000) :  Int(result.endDate.timeIntervalSince1970 * 1000),
                                 "source_id":"",

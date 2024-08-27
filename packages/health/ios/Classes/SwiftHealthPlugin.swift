@@ -439,7 +439,7 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
                     r.enumerateStatistics(from: dateFrom, to: dateTo) { (result, stop) in
                         if let v = result.sumQuantity() {
 
-                            let unit = HKUnit.mile()
+                            let unit = HKUnit.meter()
                             data.append([
                                 "uuid" : "",
                                 "value": result.sumQuantity()?.doubleValue(for: unit) ?? 0,
